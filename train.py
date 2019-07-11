@@ -17,10 +17,10 @@ class ModelTrainer(object):
         self.enc_module = enc_module.to(tt.arg.device)
         self.gnn_module = gnn_module.to(tt.arg.device)
 
-        if tt.arg.num_gpus > 1:
+        if not isinstance(tt.arg.gpu, int):
             print('Construct multi-gpu model ...')
-            self.enc_module = nn.DataParallel(self.enc_module, device_ids=[0, 1], dim=0)
-            self.gnn_module = nn.DataParallel(self.gnn_module, device_ids=[0, 1], dim=0)
+            self.enc_module = nn.DataParallel(self.enc_module, device_ids=[i for i in range(len(tt.arg.gpu))], dim=0)
+            self.gnn_module = nn.DataParallel(self.gnn_module, device_ids=[i for i in range(len(tt.arg.gpu))], dim=0)
 
             print('done!\n')
 
@@ -49,7 +49,7 @@ class ModelTrainer(object):
 
         # set edge mask (to distinguish support and query edges)
         num_supports = tt.arg.num_ways_train * tt.arg.num_shots_train
-        num_queries = tt.arg.num_ways_train * 1 
+        num_queries = tt.arg.num_ways_train * tt.arg.num_queries 
         num_samples = num_supports + num_queries
         support_edge_mask = torch.zeros(tt.arg.meta_batch_size, num_samples, num_samples).to(tt.arg.device) #size:[40, 30, 30]
         support_edge_mask[:, :num_supports, :num_supports] = 1
@@ -79,6 +79,7 @@ class ModelTrainer(object):
              query_label] = self.data_loader['train'].get_task_batch(num_tasks=tt.arg.meta_batch_size,
                                                                      num_ways=tt.arg.num_ways_train,
                                                                      num_shots=tt.arg.num_shots_train,
+                                                                     num_queries=tt.arg.num_queries,
                                                                      seed=iter + tt.arg.seed)
 
             # support_data.size(): [40, 25, 3, 84, 84]
@@ -212,7 +213,7 @@ class ModelTrainer(object):
         best_acc = 0
         # set edge mask (to distinguish support and query edges)
         num_supports = tt.arg.num_ways_test * tt.arg.num_shots_test
-        num_queries = tt.arg.num_ways_test * 1
+        num_queries = tt.arg.num_ways_test * tt.arg.num_queries
         num_samples = num_supports + num_queries
         support_edge_mask = torch.zeros(tt.arg.test_batch_size, num_samples, num_samples).to(tt.arg.device)
         support_edge_mask[:, :num_supports, :num_supports] = 1
@@ -239,6 +240,7 @@ class ModelTrainer(object):
              query_label] = self.data_loader[partition].get_task_batch(num_tasks=tt.arg.test_batch_size,
                                                                        num_ways=tt.arg.num_ways_test,
                                                                        num_shots=tt.arg.num_shots_test,
+                                                                       num_queries=tt.arg.num_queries,
                                                                        seed=iter)
 
             # set as single data
@@ -384,6 +386,7 @@ def set_exp_name():
     exp_name += '_SEED-{}'.format(tt.arg.seed)
     exp_name += '_TrIter-{}'.format(tt.arg.train_iteration)
     exp_name += '_Declr-{}'.format(tt.arg.dec_lr)
+    exp_name += '_Q-{}'.format(tt.arg.num_queries)
 
     return exp_name
 
@@ -391,7 +394,7 @@ if __name__ == '__main__':
 
     tt.arg.device = 'cuda:0' if tt.arg.device is None else tt.arg.device
     # replace dataset_root with your own
-    tt.arg.dataset_root = '/st2/hayeon/data/egnn_data'
+    tt.arg.dataset_root = '/st2/hayeon/data/egnn_data' if tt.arg.dataset is 'mini' else '/st2/hayeon/data/dhna'
     tt.arg.dataset = 'mini' if tt.arg.dataset is None else tt.arg.dataset
     tt.arg.num_ways = 5 if tt.arg.num_ways is None else tt.arg.num_ways
     tt.arg.num_shots = 1 if tt.arg.num_shots is None else tt.arg.num_shots
@@ -400,7 +403,8 @@ if __name__ == '__main__':
     tt.arg.meta_batch_size = 40 if tt.arg.meta_batch_size is None else tt.arg.meta_batch_size
     tt.arg.transductive = False if tt.arg.transductive is None else tt.arg.transductive
     tt.arg.seed = 222 if tt.arg.seed is None else tt.arg.seed
-    tt.arg.num_gpus = 1 if tt.arg.num_gpus is None else tt.arg.num_gpus
+    # tt.arg.num_gpus = 1 if tt.arg.num_gpus is None else tt.arg.num_gpus
+    tt.arg.num_queries = 15
 
     tt.arg.num_ways_train = tt.arg.num_ways
     tt.arg.num_ways_test = tt.arg.num_ways
@@ -417,7 +421,7 @@ if __name__ == '__main__':
     tt.arg.emb_size = 128
 
     # train, test parameters
-    tt.arg.train_iteration = 100000 if tt.arg.dataset == 'mini' else 200000
+    tt.arg.train_iteration = 150000 if tt.arg.dataset == 'mini' else 200000
     tt.arg.test_iteration = 10000
     tt.arg.test_interval = 5000 if tt.arg.test_interval is None else tt.arg.test_interval
     tt.arg.test_batch_size = 10
@@ -432,6 +436,9 @@ if __name__ == '__main__':
     if tt.arg.meta_batch_size == 20:
         tt.arg.train_iteration = 200000
         tt.arg.dec_lr = 30000
+
+    # HY params
+    tt.arg.gpu = 0 if tt.arg.gpu is None else tt.arg.gpu
 
     tt.arg.experiment = set_exp_name() if tt.arg.experiment is None else tt.arg.experiment
 

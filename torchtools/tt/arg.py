@@ -119,7 +119,10 @@ def _parse_opts():
     #
     # inject default options
     #
-
+    if isinstance(arg.gpu, int) == 1:
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(arg.gpu)
+    else:
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(x) for x in arg.gpu)
     # device setting
     if arg.device is None:
         arg.device = 'cuda' if torch.cuda.is_available() else 'cpu'
