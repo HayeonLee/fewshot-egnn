@@ -35,6 +35,7 @@ def _get_writer():
             tf_log_dir += tt.arg.experiment
         tf_log_dir += datetime.datetime.now().strftime('-%Y%m%d-%H%M%S')
         # create writer
+        print('tf_log_dir', tf_log_dir)
         _writer = SummaryWriter(tf_log_dir)
     return _writer
 

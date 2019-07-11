@@ -4,6 +4,7 @@ import math
 #import seaborn as sns
 import numpy as np
 import matplotlib.pyplot as plt
+import pdb
 
 
 class ConvBlock(nn.Module):
@@ -293,6 +294,7 @@ class GraphNetwork(nn.Module):
         edge_feat_list = []
         for l in range(self.num_layers):
             # (1) edge to node
+            # size: [40, 30, 96]
             node_feat = self._modules['edge2node_net{}'.format(l)](node_feat, edge_feat)
 
             # (2) node to edge

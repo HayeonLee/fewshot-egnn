@@ -5,6 +5,7 @@ import shutil
 import os
 import random
 #import seaborn as sns
+import pdb
 
 
 class ModelTrainer(object):
@@ -18,8 +19,8 @@ class ModelTrainer(object):
 
         if tt.arg.num_gpus > 1:
             print('Construct multi-gpu model ...')
-            self.enc_module = nn.DataParallel(self.enc_module, device_ids=[0, 1, 2, 3], dim=0)
-            self.gnn_module = nn.DataParallel(self.gnn_module, device_ids=[0, 1, 2, 3], dim=0)
+            self.enc_module = nn.DataParallel(self.enc_module, device_ids=[0, 1], dim=0)
+            self.gnn_module = nn.DataParallel(self.gnn_module, device_ids=[0, 1], dim=0)
 
             print('done!\n')
 
@@ -48,13 +49,14 @@ class ModelTrainer(object):
 
         # set edge mask (to distinguish support and query edges)
         num_supports = tt.arg.num_ways_train * tt.arg.num_shots_train
-        num_queries = tt.arg.num_ways_train * 1
+        num_queries = tt.arg.num_ways_train * 1 
         num_samples = num_supports + num_queries
-        support_edge_mask = torch.zeros(tt.arg.meta_batch_size, num_samples, num_samples).to(tt.arg.device)
+        support_edge_mask = torch.zeros(tt.arg.meta_batch_size, num_samples, num_samples).to(tt.arg.device) #size:[40, 30, 30]
         support_edge_mask[:, :num_supports, :num_supports] = 1
         query_edge_mask = 1 - support_edge_mask
 
         evaluation_mask = torch.ones(tt.arg.meta_batch_size, num_samples, num_samples).to(tt.arg.device)
+
         # for semi-supervised setting, ignore unlabeled support sets for evaluation
         for c in range(tt.arg.num_ways_train):
             evaluation_mask[:,
@@ -62,7 +64,6 @@ class ModelTrainer(object):
             :num_supports] = 0
             evaluation_mask[:, :num_supports,
             ((c + 1) * tt.arg.num_shots_train - tt.arg.num_unlabeled):(c + 1) * tt.arg.num_shots_train] = 0
-
         # for each iteration
         for iter in range(self.global_step + 1, tt.arg.train_iteration + 1):
             # init grad
@@ -80,16 +81,22 @@ class ModelTrainer(object):
                                                                      num_shots=tt.arg.num_shots_train,
                                                                      seed=iter + tt.arg.seed)
 
+            # support_data.size(): [40, 25, 3, 84, 84]
+            # support_label.size(): [40, 25]
+            # query_data.size(): [40, 5, 3, 84, 84]
+            # query_label.size(): [40, 5]
+
             # set as single data
-            full_data = torch.cat([support_data, query_data], 1)
+            full_data = torch.cat([support_data, query_data], 1) # .size(): [40, 30, 3, 84, 84]
             full_label = torch.cat([support_label, query_label], 1)
-            full_edge = self.label2edge(full_label)
+            full_edge = self.label2edge(full_label) # .size(): [40, 2, 30, 30]
 
             # set init edge
             init_edge = full_edge.clone()  # batch_size x 2 x num_samples x num_samples
             init_edge[:, :, num_supports:, :] = 0.5
             init_edge[:, :, :, num_supports:] = 0.5
-            for i in range(num_queries):
+
+            for i in range(num_queries): # query itself
                 init_edge[:, 0, num_supports + i, num_supports + i] = 1.0
                 init_edge[:, 1, num_supports + i, num_supports + i] = 0.0
 
@@ -104,6 +111,7 @@ class ModelTrainer(object):
 
             # (1) encode data
             full_data = [self.enc_module(data.squeeze(1)) for data in full_data.chunk(full_data.size(1), dim=1)]
+            # [40, 30, 128]
             full_data = torch.stack(full_data, dim=1) # batch_size x num_samples x featdim
 
             # (2) predict edge logit (consider only the last layer logit, num_tasks x 2 x num_samples x num_samples)
@@ -139,7 +147,6 @@ class ModelTrainer(object):
                     full_logit_layers[l][:, :, :num_supports, :num_supports] = logit_layers[l][:, :, :, :num_supports, :num_supports].mean(1)
                     full_logit_layers[l][:, :, :num_supports, num_supports:] = logit_layers[l][:, :, :, :num_supports, -1].transpose(1, 2).transpose(2, 3)
                     full_logit_layers[l][:, :, num_supports:, :num_supports] = logit_layers[l][:, :, :, -1, :num_supports].transpose(1, 2)
-
             # (4) compute loss
             full_edge_loss_layers = [self.edge_loss((1-full_logit_layer[:, 0]), (1-full_edge[:, 0])) for full_logit_layer in full_logit_layers]
 
@@ -375,6 +382,8 @@ def set_exp_name():
     exp_name += '_L-{}_B-{}'.format(tt.arg.num_layers, tt.arg.meta_batch_size)
     exp_name += '_T-{}'.format(tt.arg.transductive)
     exp_name += '_SEED-{}'.format(tt.arg.seed)
+    exp_name += '_TrIter-{}'.format(tt.arg.train_iteration)
+    exp_name += '_Declr-{}'.format(tt.arg.dec_lr)
 
     return exp_name
 
@@ -420,6 +429,10 @@ if __name__ == '__main__':
     tt.arg.dec_lr = 15000 if tt.arg.dataset == 'mini' else 30000
     tt.arg.dropout = 0.1 if tt.arg.dataset == 'mini' else 0.0
 
+    if tt.arg.meta_batch_size == 20:
+        tt.arg.train_iteration = 200000
+        tt.arg.dec_lr = 30000
+
     tt.arg.experiment = set_exp_name() if tt.arg.experiment is None else tt.arg.experiment
 
     print(set_exp_name())
@@ -439,7 +452,6 @@ if __name__ == '__main__':
         os.makedirs('asset/checkpoints')
     if not os.path.exists('asset/checkpoints/' + tt.arg.experiment):
         os.makedirs('asset/checkpoints/' + tt.arg.experiment)
-
 
     enc_module = EmbeddingImagenet(emb_size=tt.arg.emb_size)
 
